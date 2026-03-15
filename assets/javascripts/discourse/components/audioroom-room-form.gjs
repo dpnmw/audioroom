@@ -2,7 +2,6 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import BackButton from "discourse/components/back-button";
-import DButton from "discourse/components/d-button";
 import Form from "discourse/components/form";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { i18n } from "discourse-i18n";
@@ -177,16 +176,7 @@ export default class AudioroomRoomForm extends Component {
               @format="full"
               as |field|
             >
-              <div class="audioroom-room-form__background-input-row">
-                <field.Input placeholder="#1a1a2e or https://...image.jpg" />
-                {{#if form.data.broadcast_background}}
-                  <DButton
-                    @action={{fn form.set "broadcast_background" null}}
-                    @label="audioroom.admin.room.broadcast_background_clear"
-                    class="btn-flat btn-small audioroom-room-form__background-clear"
-                  />
-                {{/if}}
-              </div>
+              <field.Input placeholder="#1a1a2e or https://...image.jpg" />
             </form.Field>
 
             <form.Field

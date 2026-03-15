@@ -177,5 +177,4 @@ en:
           broadcast_appearance: "Broadcast Appearance"
           broadcast_background: "Broadcast Background"
           broadcast_background_help: "Hex color (e.g. #1a1a2e) or image URL applied to the broadcast page background. Leave blank to use the default."
-          broadcast_background_clear: "Clear"
           broadcast_watermark: "Show developer watermark in broadcast page."
