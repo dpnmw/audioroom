@@ -35,6 +35,7 @@ module Audioroom
             m.role = Audioroom::RoomMembership::ROLE_MODERATOR
           end
         end
+        Audioroom::DirectoryBroadcaster.broadcast(action: :updated, room: room)
         render_serialized room, AdminRoomSerializer, root: :room
       else
         render_json_error room

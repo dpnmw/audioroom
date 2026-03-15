@@ -8,6 +8,8 @@ export default class AudioroomRoom extends RestModel {
       "public",
       "room_type",
       "max_participants",
+      "broadcast_background",
+      "broadcast_watermark",
     ]);
   }
 
@@ -18,6 +20,8 @@ export default class AudioroomRoom extends RestModel {
       "public",
       "room_type",
       "max_participants",
+      "broadcast_background",
+      "broadcast_watermark",
     ]);
   }
 }
