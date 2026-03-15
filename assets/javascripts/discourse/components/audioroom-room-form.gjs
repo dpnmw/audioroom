@@ -2,12 +2,14 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import BackButton from "discourse/components/back-button";
+import DButton from "discourse/components/d-button";
 import Form from "discourse/components/form";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { i18n } from "discourse-i18n";
 
 export default class AudioroomRoomForm extends Component {
   @tracked isSaving = false;
+  @tracked showStreamKey = false;
 
   get isAdminContext() {
     return !this.args.onSubmit;
@@ -58,9 +60,24 @@ export default class AudioroomRoomForm extends Component {
     return "audioroom.room.save";
   }
 
+  get hasExistingStreamKey() {
+    return !!this.args.room?.youtube_stream_key;
+  }
+
+  @action
+  toggleShowStreamKey() {
+    this.showStreamKey = !this.showStreamKey;
+  }
+
   @action
   async handleSubmit(data) {
     this.isSaving = true;
+
+    // If the stream key field was left blank and a key already exists,
+    // remove it from the payload so the existing value is not overwritten.
+    if (!data.youtube_stream_key && this.hasExistingStreamKey) {
+      delete data.youtube_stream_key;
+    }
 
     try {
       if (this.args.onSubmit) {
@@ -165,7 +182,26 @@ export default class AudioroomRoomForm extends Component {
             @format="full"
             as |field|
           >
-            <field.Input @type="password" autocomplete="off" />
+            <div class="audioroom-room-form__secret-input-row">
+              <field.Input
+                @type={{if this.showStreamKey "text" "password"}}
+                autocomplete="off"
+                placeholder={{if
+                  this.hasExistingStreamKey
+                  (i18n "audioroom.admin.room.youtube_stream_key_set")
+                }}
+              />
+              <DButton
+                @action={{this.toggleShowStreamKey}}
+                @icon={{if this.showStreamKey "eye-slash" "eye"}}
+                @title={{if
+                  this.showStreamKey
+                  (i18n "audioroom.admin.room.hide_key")
+                  (i18n "audioroom.admin.room.show_key")
+                }}
+                class="btn-flat audioroom-room-form__secret-toggle"
+              />
+            </div>
           </form.Field>
 
           <form.Section @title={{i18n "audioroom.admin.room.broadcast_appearance"}}>

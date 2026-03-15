@@ -4,6 +4,20 @@
   }
 }
 
+.audioroom-room-form__secret-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+
+  .form-kit__control-input {
+    flex: 1;
+  }
+
+  .audioroom-room-form__secret-toggle {
+    flex-shrink: 0;
+  }
+}
+
 .audioroom-rooms-table {
   margin-top: 1.5em;
 
