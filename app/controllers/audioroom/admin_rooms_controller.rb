@@ -30,6 +30,11 @@ module Audioroom
       room = Audioroom::Room.find(params[:id])
 
       if room.update(room_params)
+        if room.saved_change_to_room_type? && room.stage?
+          room.room_memberships.find_or_create_by!(user_id: room.creator_id) do |m|
+            m.role = Audioroom::RoomMembership::ROLE_MODERATOR
+          end
+        end
         render_serialized room, AdminRoomSerializer, root: :room
       else
         render_json_error room
