@@ -106,6 +106,7 @@ en:
         live_badge: "LIVE"
         stream_key: "YouTube Stream Key"
         stream_key_placeholder: "xxxx-xxxx-xxxx-xxxx"
+        stream_key_placeholder_saved: "Key saved — enter new value to replace"
         stream_key_help: "Find your stream key in YouTube Studio → Go Live → Stream settings."
         layout: "Broadcast Layout"
         layout_speaker: "Speaker"

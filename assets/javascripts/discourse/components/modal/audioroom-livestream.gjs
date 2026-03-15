@@ -7,15 +7,19 @@ import DButton from "discourse/components/d-button";
 import DModal from "discourse/components/d-modal";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
-import { eq } from "truth-helpers";
+import { and, eq, not, or } from "truth-helpers";
 import { i18n } from "discourse-i18n";
 
 export default class AudioroomLivestreamModal extends Component {
   @service audioroomRooms;
 
-  @tracked streamKey = this.args.model.room.youtube_stream_key || "";
+  @tracked streamKey = "";
   @tracked layout = this.args.model.room.broadcast_layout || "speaker";
   @tracked isSaving = false;
+
+  get hasSavedKey() {
+    return !!this.args.model.room.has_youtube_stream_key;
+  }
 
   get room() {
     return this.args.model.room;
@@ -53,7 +57,7 @@ export default class AudioroomLivestreamModal extends Component {
 
   @action
   async startStream() {
-    if (!this.streamKey.trim()) {
+    if (!this.streamKey.trim() && !this.hasSavedKey) {
       return;
     }
     this.isSaving = true;
@@ -149,7 +153,11 @@ export default class AudioroomLivestreamModal extends Component {
               type="password"
               class="input-large"
               value={{this.streamKey}}
-              placeholder={{i18n "audioroom.livestream.stream_key_placeholder"}}
+              placeholder={{if
+                this.hasSavedKey
+                (i18n "audioroom.livestream.stream_key_placeholder_saved")
+                (i18n "audioroom.livestream.stream_key_placeholder")
+              }}
               {{on "input" this.onStreamKeyInput}}
               autocomplete="off"
             />
@@ -192,7 +200,7 @@ export default class AudioroomLivestreamModal extends Component {
             @action={{this.startStream}}
             @label="audioroom.livestream.start"
             @icon="circle-play"
-            @disabled={{this.isSaving}}
+            @disabled={{(or this.isSaving (and (not this.hasSavedKey) (not this.streamKey)))}}
             class="btn-primary"
           />
         {{/if}}

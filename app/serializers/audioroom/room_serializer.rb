@@ -27,10 +27,15 @@ module Audioroom
                :is_following,
                :broadcast_background,
                :broadcast_watermark,
+               :has_youtube_stream_key,
                :archived
 
     def live
       object.live?
+    end
+
+    def has_youtube_stream_key
+      object.youtube_stream_key.present?
     end
 
     has_one :membership, serializer: Audioroom::RoomMembershipSerializer, embed: :objects
