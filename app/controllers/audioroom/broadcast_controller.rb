@@ -18,6 +18,7 @@ module Audioroom
     def show
       @room = Audioroom::Room.find_by(slug: params[:slug])
       raise Discourse::NotFound unless @room
+      raise Discourse::NotFound if @room.archived?
 
       @layout = %w[speaker grid].include?(params[:layout]) ? params[:layout] : "speaker"
       @livekit_url = SiteSetting.audioroom_livekit_url

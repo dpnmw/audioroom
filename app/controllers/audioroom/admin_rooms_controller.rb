@@ -62,16 +62,22 @@ module Audioroom
     private
 
     def room_params
-      params.require(:room).permit(
-        :name,
-        :description,
-        :public,
-        :max_participants,
-        :room_type,
-        :youtube_stream_key,
-        :broadcast_background,
-        :broadcast_watermark,
-      )
+      permitted =
+        params.require(:room).permit(
+          :name,
+          :description,
+          :public,
+          :max_participants,
+          :room_type,
+          :youtube_stream_key,
+          :broadcast_background,
+          :broadcast_watermark,
+        )
+      if permitted.key?(:room_type)
+        permitted[:room_type] = Audioroom::Room::ROOM_TYPES[permitted[:room_type].to_s] ||
+          Audioroom::Room::ROOM_TYPE_OPEN
+      end
+      permitted
     end
   end
 end
