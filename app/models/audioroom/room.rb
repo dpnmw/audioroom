@@ -2,7 +2,6 @@
 
 module Audioroom
   class Room < ActiveRecord::Base
-    reset_column_information
     self.table_name = "#{Audioroom.table_name_prefix}rooms"
 
     ROOM_TYPE_OPEN = 0

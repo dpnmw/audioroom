@@ -26,5 +26,9 @@ module Audioroom
     def live
       object.live?
     end
+
+    def archived
+      object.respond_to?(:archived) ? object.archived : false
+    end
   end
 end
