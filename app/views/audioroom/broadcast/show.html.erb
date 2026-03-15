@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= @site_name %> — <%= @room_name %></title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background:#0D47A1;
+  color: #e6edf3;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 80% 70% at 50% 55%, rgba(0,160,130,0.09) 0%, rgba(60,30,140,0.07) 45%, transparent 70%);
+  pointer-events: none;
+}
+
+body::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 85% at 50% 50%, transparent 40%, rgba(0,0,0,0.55) 75%, rgba(0,0,0,0.88) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 3;
+  justify-content: space-between;
+}
+
+.live-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: #e53935;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 3px;
+ 
+}
+
+.live-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  animation: dotpulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dotpulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+
+.header-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.header-room-label {
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.header-spacer { flex: 1; }
+
+.header-stat {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 15px;
+  opacity: 0.6;
+}
+
+
+#participants-speaker {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 16px 10px;
+  overflow: hidden;
+  position: relative;
+  z-index: 2;
+}
+
+#participants-grid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 16px 10px;
+  overflow: hidden;
+  position: relative;
+  z-index: 2;
+}
+
+#speaker-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.speaker-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(0,230,118,0.1);
+  border: 1px solid rgba(0,230,118,0.22);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #00e676;
+  letter-spacing: 0.8px;
+}
+
+
+.tile.main-tile {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px;
+  position: relative;
+}
+
+.tile.main-tile.speaking {
+  border-color: rgba(0,220,110,0.8);
+}
+
+.mic-badge {
+  position: absolute;
+  bottom: 75px;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background:rgba(20,32,48,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mic-badge.muted {
+  background-color: rgba(255,80,80,0.6);
+}
+
+
+.speaker-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tile.small-tile {
+ 
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  position: relative;
+}
+
+.tile.small-tile.muted { opacity: 0.5; }
+
+.tile.small-tile .mic-badge-sm {
+  position: absolute;
+  top: 75px;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%; 
+  background:rgba(20,32,48,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+.avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.tile.main-tile .avatar { 
+  width: 288px; height: 288px;
+  padding: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(0, 220, 110, 0.55);
+}
+.tile.small-tile .avatar { 
+  width: 96px; 
+  height: 96px; 
+  padding: 5px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.avatar-placeholder {
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1e3d60, #2e1d5a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: rgba(255,255,255,0.9);
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.07);
+}
+
+.tile.main-tile .avatar-placeholder { width: 288px; height: 288px; font-size: 22px; }
+.tile.small-tile .avatar-placeholder { width: 96px; height: 96px; font-size: 10px; background: linear-gradient(135deg, #1a2f40, #201240); box-shadow: none; }
+
+
+.username { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-align: center; }
+.tile.main-tile .username { font-size: 15px; letter-spacing: -0.2px; text-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+.tile.small-tile .username { font-size: 12px; opacity: 0.65; }
+
+
+.waveform { display: flex; align-items: center; gap: 2px; height: 14px; }
+.waveform-bar { width: 3px; background: #00e676; border-radius: 2px; animation: none; height: 3px; }
+.speaking .waveform-bar:nth-child(1) { animation: wave 0.8s ease-in-out infinite; }
+.speaking .waveform-bar:nth-child(2) { animation: wave 0.8s ease-in-out 0.15s infinite; }
+.speaking .waveform-bar:nth-child(3) { animation: wave 0.8s ease-in-out 0.3s infinite; }
+.speaking .waveform-bar:nth-child(4) { animation: wave 0.8s ease-in-out 0.45s infinite; }
+.speaking .waveform-bar:nth-child(5) { animation: wave 0.8s ease-in-out 0.6s infinite; }
+
+@keyframes wave { 0%, 100% { height: 3px; } 50% { height: 14px; } 
+}
+
+
+#participants-grid { flex: 1; display: grid; gap: 10px; padding: 16px; overflow: hidden; }
+
+
+.empty-state { flex: 1; display: flex; align-items: center; justify-content: center; opacity: 0.4; font-size: 16px; position: relative; z-index: 2; }
+
+
+footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.subscribe-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: linear-gradient(135deg, #e53935, #c62828);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  padding: 6px 18px;
+  border-radius: 20px;
+  
+}
+
+.subscribe-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  
+}
+
+
+
+.broadcast-watermark {
+  position: fixed;
+  bottom: 16px;
+  right: 20px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  z-index: 9999;
+  pointer-events: none;
+  font-family: sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.broadcast-watermark a {
+  color: inherit;
+  text-decoration: none;
+}
+
+  </style>
+</head>
+<body>
+   <header>
+    <span class="live-badge">
+      <span class="live-badge-dot"></span>
+      ON AIR
+    </span>
+    <div class="header-stat">
+    <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="#e3e3e3"><path d="M283.33-240v-480H350v480h-66.67ZM446.67-80v-800h66.66v800h-66.66ZM120-400v-160h66.67v160H120Zm490 160v-480h66.67v480H610Zm163.33-160v-160H840v160h-66.67Z"/></svg>
+    <%= @room_name %>
+    </div>
+    
+     <div class="header-stat">
+    <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="#e3e3e3"><path d="M338.67-120h-152q-27 0-46.84-19.83Q120-159.67 120-186.67V-480q0-75 28.5-140.5t77-114q48.5-48.5 114-77T480-840q75 0 140.5 28.5t114 77q48.5 48.5 77 114T840-480v293.33q0 27-19.83 46.84Q800.33-120 773.33-120h-152v-304h152v-56q0-122.57-85.5-207.95T480-773.33q-122.33 0-207.83 85.38-85.5 85.38-85.5 207.95v56h152v304ZM272-357.33h-85.33v170.66H272v-170.66Zm416 0v170.66h85.33v-170.66H688Zm-416 0h-85.33H272Zm416 0h85.33H688Z"/></svg>
+    <span id="listener-count">0</span> listeners
+    </div>
+  </header>
+
+  <div id="participants-speaker" style="<%= @layout == 'grid' ? 'display:none' : '' %>">
+    <div class="speaker-label">
+      <svg width="8" height="8" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#00e676"/></svg>
+      ACTIVE SPEAKER
+    </div>
+    <div id="speaker-main"></div>
+    <div id="speaker-row" class="speaker-row"></div>
+  </div>
+
+  <div id="participants-grid" style="<%= @layout == 'grid' ? '' : 'display:none' %>"></div>
+
+  <div class="empty-state" id="empty-state" style="display:none">Waiting for participants…</div>
+
+  <footer>
+    <div class="subscribe-btn">
+      <div class="subscribe-icon">
+         <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="#e3e3e3"><path d="M773.33-153.33v-80h-80V-300h80v-80H840v80h80v66.67h-80v80h-66.67ZM480.67-480Zm-.77-280 40.57.5q40.57.5 93.81 2 53.25 1.5 105.49 5Q772-749 796-743q24.65 6.89 42.66 25.11 18.01 18.22 24.34 42.22Q875.33-630 877.5-568t.83 116.67h-65.66q1.33-45.67-1-107.84-2.34-62.16-13-99.5-2-7-7.34-12.5-5.33-5.5-12.33-7.5-25.33-6.66-117.33-10.66t-181.67-4q-90.19 0-182.43 4-92.24 4-116.9 10.66-7 2-12.17 7.67t-7.17 12.67q-8 30.33-11.33 86.05-3.33 55.71-3.33 92.16 0 36.45 3.33 92.79 3.33 56.33 11.33 86 2 7.66 6.84 12.5 4.83 4.83 12.5 7.5 24 6.66 116.66 10.66 92.67 4 182.67 4h69.64q35.69 0 69.69-1.66v66.44q-25 .89-49.83 1.39-24.83.5-44.46.5H480q-72.07 0-135-2-53.67-1.67-105.83-5.17-52.17-3.5-75.53-9.5-25.31-7-42.9-25.01t-24.07-42.65q-6-24.18-9.5-57.43Q83.67-375 82-406.33q-2-36.33-2-73.67 0-37.69 2-73.33 1.67-31 5.17-64.23 3.5-33.23 9.5-57.77 6.33-24 24-42.34Q138.33-736 163.64-743q23.36-6 75.52-9.5T345-758q62.88-2 134.9-2ZM406-370l189.33-110L406-590v220Z"/></svg>
+      </div>
+      Subscribe Now
+    </div>
+  </footer>
+
+  <%# Pass server data via data attributes — CSP-safe, no inline script needed %>
+  <div id="broadcast-config"
+       data-livekit-url="<%= @livekit_url %>"
+       data-livekit-token="<%= @livekit_token %>"
+       data-layout="<%= @layout %>"
+       data-site-title="<%= @site_name %>"
+       data-background="<%= @room.broadcast_background %>"
+       data-watermark="<%= @room.broadcast_watermark.to_s %>"
+       data-room-type="<%= @room.room_type %>"
+       style="display:none"></div>
+
+  <script src="/plugins/audioroom/javascripts/broadcast-app.js"></script>
+</body>
+</html>

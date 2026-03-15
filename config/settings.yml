@@ -1,0 +1,76 @@
+plugins:
+  audioroom_enabled:
+    default: false
+    client: true
+  audioroom_sidebar_enabled:
+    default: true
+    client: true
+  audioroom_allowed_groups:
+    type: group_list
+    list_type: compact
+    default: "0"
+    allow_any: false
+    refresh: true
+  audioroom_create_room_allowed_groups:
+    type: group_list
+    list_type: compact
+    default: "1|2|12"
+    allow_any: false
+    refresh: true
+  audioroom_max_rooms_per_user:
+    default: 5
+  audioroom_participant_ttl_seconds:
+    default: 30
+  audioroom_livekit_url:
+    default: "wss://livekit.example.com"
+    client: true
+  audioroom_livekit_api_key:
+    default: ""
+    secret: true
+  audioroom_livekit_api_secret:
+    default: ""
+    secret: true
+  # Noise suppression is always active via LiveKit's native audio processing.
+  # This setting controls whether the toggle is shown in the UI.
+  audioroom_noise_suppression:
+    default: false
+    client: true
+    hidden: true
+  audioroom_idle_threshold_minutes:
+    default: 5
+    min: 0
+    max: 60
+    client: true
+  audioroom_afk_auto_mute_threshold_minutes:
+    default: 15
+    min: 0
+    max: 120
+    client: true
+  audioroom_afk_disconnect_threshold_minutes:
+    default: 30
+    min: 0
+    max: 240
+    client: true
+  audioroom_auto_status_enabled:
+    default: true
+    client: true
+  audioroom_badges_enabled:
+    default: false
+  audioroom_livekit_api_url:
+    default: "http://localhost:7880"
+    secret: true
+  audioroom_egress_url:
+    default: "http://localhost:7788"
+    secret: true
+  audioroom_analytics_enabled:
+    default: true
+  audioroom_session_retention_days:
+    default: 400
+    min: 7
+    max: 3650
+  audioroom_room_notifications_enabled:
+    default: true
+    client: false
+  audioroom_broadcast_customization_enabled:
+    default: true
+    client: false

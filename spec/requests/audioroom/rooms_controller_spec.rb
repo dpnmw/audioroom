@@ -1,0 +1,461 @@
+# frozen_string_literal: true
+require "rails_helper"
+require_relative "../../../db/migrate/20241107000000_create_audioroom_rooms"
+
+RSpec.describe Audioroom::RoomsController do
+  before do
+    ActiveRecord::Migration.suppress_messages do
+      unless ActiveRecord::Base.connection.table_exists?(:audioroom_rooms)
+        CreateAudioroomRooms.new.change
+      end
+    end
+  end
+
+  fab!(:staff, :admin)
+  fab!(:user) { Fabricate(:user, trust_level: TrustLevel[2]) }
+  fab!(:other_participant) { Fabricate(:user, trust_level: TrustLevel[2]) }
+  fab!(:room) { Fabricate(:audioroom_room, creator: staff, public: true) }
+
+  before do
+    SiteSetting.audioroom_enabled = true
+    SiteSetting.audioroom_allowed_groups = Group::AUTO_GROUPS[:everyone]
+    SiteSetting.audioroom_create_room_allowed_groups = "#{Group::AUTO_GROUPS[:trust_level_2]}"
+  end
+
+  describe "#index" do
+    it "returns rooms visible to the user" do
+      sign_in(user)
+
+      get "/audioroom/rooms.json"
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["rooms"]).to be_present
+    end
+  end
+
+  describe "#create" do
+    it "allows trusted user to create a room" do
+      sign_in(user)
+
+      post "/audioroom/rooms.json", params: { room: { name: "Game Night", public: true } }
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["room"]["name"]).to eq("Game Night")
+    end
+  end
+
+  describe "#join" do
+    it "tracks users when they join a room" do
+      sign_in(user)
+
+      post "/audioroom/rooms/#{room.id}/join.json"
+
+      expect(response.status).to eq(200)
+      json = response.parsed_body
+      expect(json["room"]["active_participants"].map { |p| p["id"] }).to include(user.id)
+    end
+
+    context "with user status integration" do
+      before do
+        SiteSetting.enable_user_status = true
+        SiteSetting.audioroom_auto_status_enabled = true
+      end
+
+      it "sets user status on join" do
+        sign_in(user)
+
+        post "/audioroom/rooms/#{room.id}/join.json"
+
+        user.reload
+        expect(user.user_status.emoji).to eq("studio_microphone")
+        expect(user.user_status.description).to eq("In #{room.name}")
+      end
+
+      it "skips status when user already has one" do
+        sign_in(user)
+        user.set_status!("Busy", "no_entry")
+
+        post "/audioroom/rooms/#{room.id}/join.json"
+
+        user.reload
+        expect(user.user_status.emoji).to eq("no_entry")
+      end
+
+      it "skips status when skip_status param is sent" do
+        sign_in(user)
+
+        post "/audioroom/rooms/#{room.id}/join.json", params: { skip_status: true }
+
+        user.reload
+        expect(user.user_status).to be_nil
+      end
+    end
+  end
+
+  describe "#leave" do
+    before do
+      SiteSetting.enable_user_status = true
+      SiteSetting.audioroom_auto_status_enabled = true
+    end
+
+    it "clears Audioroom status on leave" do
+      sign_in(user)
+      Audioroom::ParticipantTracker.add(room.id, user.id)
+      user.set_status!("In #{room.name}", "studio_microphone", 2.minutes.from_now)
+
+      delete "/audioroom/rooms/#{room.id}/leave.json"
+
+      expect(response.status).to eq(204)
+      user.reload
+      expect(user.user_status).to be_nil
+    end
+
+    it "preserves non-Audioroom status on leave" do
+      sign_in(user)
+      Audioroom::ParticipantTracker.add(room.id, user.id)
+      user.set_status!("On vacation", "palm_tree")
+
+      delete "/audioroom/rooms/#{room.id}/leave.json"
+
+      expect(response.status).to eq(204)
+      user.reload
+      expect(user.user_status.emoji).to eq("palm_tree")
+    end
+  end
+
+  describe "#heartbeat" do
+    it "refreshes participant presence without rejoining" do
+      sign_in(user)
+      Audioroom::ParticipantTracker.remove(room.id, user.id)
+
+      post "/audioroom/rooms/#{room.id}/heartbeat.json"
+
+      expect(response.status).to eq(204)
+      expect(Audioroom::ParticipantTracker.user_ids(room.id)).to include(user.id)
+    end
+
+    context "with user status integration" do
+      before do
+        SiteSetting.enable_user_status = true
+        SiteSetting.audioroom_auto_status_enabled = true
+        sign_in(user)
+        Audioroom::ParticipantTracker.add(room.id, user.id)
+        Audioroom::ParticipantTracker.update_metadata(room.id, user.id, { role: "participant" })
+        Audioroom::UserStatusManager.set_voice_status(user, room)
+      end
+
+      it "refreshes status expiry on heartbeat" do
+        freeze_time do
+          post "/audioroom/rooms/#{room.id}/heartbeat.json"
+
+          user.reload
+          expect(user.user_status.ends_at).to be_within(1.second).of(2.minutes.from_now)
+        end
+      end
+
+      it "transitions to AFK status" do
+        post "/audioroom/rooms/#{room.id}/heartbeat.json", params: { idle_state: "afk" }
+
+        user.reload
+        expect(user.user_status.emoji).to eq("zzz")
+        expect(user.user_status.description).to eq("AFK in #{room.name}")
+      end
+
+      it "transitions back from AFK to active status" do
+        Audioroom::UserStatusManager.set_afk_status(user, room)
+
+        post "/audioroom/rooms/#{room.id}/heartbeat.json", params: { idle_state: "active" }
+
+        user.reload
+        expect(user.user_status.emoji).to eq("studio_microphone")
+        expect(user.user_status.description).to eq("In #{room.name}")
+      end
+
+      it "skips status refresh when skip_status metadata is set" do
+        Audioroom::ParticipantTracker.update_metadata(
+          room.id,
+          user.id,
+          { role: "participant", skip_status: true },
+        )
+        user.clear_status!
+
+        post "/audioroom/rooms/#{room.id}/heartbeat.json"
+
+        user.reload
+        expect(user.user_status).to be_nil
+      end
+    end
+  end
+
+  describe "#kick" do
+    before { Audioroom::ParticipantTracker.add(room.id, other_participant.id) }
+
+    it "allows room manager to kick participants" do
+      sign_in(staff)
+
+      published = []
+      allow(MessageBus).to receive(:publish) { |channel, data, opts|
+        published << [channel, data, opts]
+      }
+
+      delete "/audioroom/rooms/#{room.id}/kick.json", params: { user_id: other_participant.id }
+
+      expect(response.status).to eq(204)
+      expect(Audioroom::ParticipantTracker.user_ids(room.id)).not_to include(other_participant.id)
+
+      kick_message = published.find { |(_, data)| data[:type] == "kicked" }
+      expect(kick_message).to be_present
+      expect(kick_message[2][:user_ids]).to eq([other_participant.id])
+    end
+
+    it "prevents non-managers from kicking" do
+      low_trust_user = Fabricate(:user, trust_level: TrustLevel[0])
+      sign_in(low_trust_user)
+
+      delete "/audioroom/rooms/#{room.id}/kick.json", params: { user_id: other_participant.id }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "prevents kicking oneself" do
+      sign_in(staff)
+
+      delete "/audioroom/rooms/#{room.id}/kick.json", params: { user_id: staff.id }
+
+      expect(response.status).to eq(400)
+    end
+
+    it "clears kicked user's Audioroom status" do
+      SiteSetting.enable_user_status = true
+      SiteSetting.audioroom_auto_status_enabled = true
+      sign_in(staff)
+      other_participant.set_status!("In #{room.name}", "studio_microphone", 2.minutes.from_now)
+
+      delete "/audioroom/rooms/#{room.id}/kick.json", params: { user_id: other_participant.id }
+
+      expect(response.status).to eq(204)
+      other_participant.reload
+      expect(other_participant.user_status).to be_nil
+    end
+
+    it "prevents kicking the room creator" do
+      sign_in(staff)
+      other_room = Fabricate(:audioroom_room, creator: user, public: true)
+      Audioroom::ParticipantTracker.add(other_room.id, user.id)
+
+      delete "/audioroom/rooms/#{other_room.id}/kick.json", params: { user_id: user.id }
+
+      expect(response.status).to eq(400)
+    end
+  end
+
+  describe "#toggle_mute" do
+    before { Audioroom::ParticipantTracker.add(room.id, user.id) }
+
+    it "sets muted metadata and broadcasts participants" do
+      sign_in(user)
+
+      published = []
+      allow(MessageBus).to receive(:publish) { |channel, data, opts|
+        published << [channel, data, opts]
+      }
+
+      post "/audioroom/rooms/#{room.id}/toggle_mute.json", params: { muted: true }
+
+      expect(response.status).to eq(204)
+
+      metadata = Audioroom::ParticipantTracker.get_metadata(room.id, user.id)
+      expect(metadata[:is_muted]).to eq(true)
+
+      participants_message = published.find { |(_, data)| data[:type] == "participants" }
+      expect(participants_message).to be_present
+      muted_participant = participants_message[1][:participants].find { |p| p[:id] == user.id }
+      expect(muted_participant[:is_muted]).to eq(true)
+    end
+
+    it "unmutes when muted is false" do
+      sign_in(user)
+      Audioroom::ParticipantTracker.update_metadata(room.id, user.id, { is_muted: true })
+
+      post "/audioroom/rooms/#{room.id}/toggle_mute.json", params: { muted: false }
+
+      expect(response.status).to eq(204)
+
+      metadata = Audioroom::ParticipantTracker.get_metadata(room.id, user.id)
+      expect(metadata[:is_muted]).to eq(false)
+    end
+
+    it "sets deafened metadata" do
+      sign_in(user)
+
+      post "/audioroom/rooms/#{room.id}/toggle_mute.json", params: { muted: true, deafened: true }
+
+      expect(response.status).to eq(204)
+
+      metadata = Audioroom::ParticipantTracker.get_metadata(room.id, user.id)
+      expect(metadata[:is_muted]).to eq(true)
+      expect(metadata[:is_deafened]).to eq(true)
+    end
+
+    it "requires authentication" do
+      post "/audioroom/rooms/#{room.id}/toggle_mute.json", params: { muted: true }
+
+      expect(response.status).to eq(403)
+    end
+  end
+
+  describe "#join with metadata" do
+    it "includes is_muted and is_deafened in active_participants when metadata exists" do
+      sign_in(user)
+      Audioroom::ParticipantTracker.add(room.id, other_participant.id)
+      Audioroom::ParticipantTracker.update_metadata(
+        room.id,
+        other_participant.id,
+        { is_muted: true, is_deafened: true },
+      )
+
+      post "/audioroom/rooms/#{room.id}/join.json"
+
+      expect(response.status).to eq(200)
+      participants = response.parsed_body["room"]["active_participants"]
+      participant = participants.find { |p| p["id"] == other_participant.id }
+      expect(participant["is_muted"]).to eq(true)
+      expect(participant["is_deafened"]).to eq(true)
+    end
+  end
+
+  describe "#signal" do
+    it "rejects missing payloads" do
+      sign_in(user)
+
+      post "/audioroom/rooms/#{room.id}/signal.json", params: { payload: {} }
+
+      expect(response.status).to eq(400)
+    end
+
+    it "relays ICE candidate payloads" do
+      sign_in(user)
+
+      candidate_payload = {
+        candidate: "candidate:347230118 1 udp 41819902 203.0.113.1 54400 typ host",
+        sdpMid: "0",
+        sdpMLineIndex: 0,
+        usernameFragment: "abc123",
+      }
+
+      published = []
+      allow(MessageBus).to receive(:publish) do |channel, data, opts|
+        published << [channel, data, opts]
+      end
+
+      post "/audioroom/rooms/#{room.id}/signal.json",
+           params: {
+             payload: {
+               type: "candidate",
+               candidate: candidate_payload,
+               recipient_id: staff.id,
+             },
+           }
+
+      expect(response.status).to eq(204)
+
+      # Verify MessageBus received correct parameters
+      expect(MessageBus).to have_received(:publish) do |channel, data, opts|
+        expect(channel).to eq(Audioroom.room_channel(room.id))
+        expect(data[:type]).to eq("signal")
+        expect(data[:room_id]).to eq(room.id)
+        expect(data[:sender_id]).to eq(user.id)
+        expect(data[:data][:type]).to eq("candidate")
+        expect(data[:data][:candidate][:candidate]).to eq(candidate_payload[:candidate])
+        expect(opts[:user_ids]).to eq([staff.id])
+      end
+    end
+
+    it "accepts batched events payloads" do
+      sign_in(user)
+
+      published = []
+      allow(MessageBus).to receive(:publish) do |channel, data, opts|
+        published << [channel, data, opts]
+      end
+
+      post "/audioroom/rooms/#{room.id}/signal.json",
+           params: {
+             payload: {
+               recipient_id: staff.id,
+               events: [
+                 { type: "offer", sdp: "v=0" },
+                 {
+                   type: "candidate",
+                   candidate: {
+                     candidate: "candidate:1 1 udp 2122260223 10.0.0.1 8998 typ host",
+                   },
+                 },
+               ],
+             },
+           }
+
+      expect(response.status).to eq(204)
+      expect(MessageBus).to have_received(:publish).twice
+
+      expect(published.map(&:first)).to all(eq(Audioroom.room_channel(room.id)))
+      expect(published.map { |(_, data)| data[:sender_id] }).to all(eq(user.id))
+      expect(published.map { |(_, _, opts)| opts[:user_ids] }).to all(eq([staff.id]))
+
+      types = published.map { |(_, data)| data[:data][:type] }
+      expect(types).to contain_exactly("offer", "candidate")
+      expect(published.find { |(_, data)| data[:data][:type] == "offer" }[1][:data][:sdp]).to eq(
+        "v=0",
+      )
+      expect(
+        published.find { |(_, data)| data[:data][:type] == "candidate" }[1][:data][:candidate][
+          :candidate
+        ],
+      ).to eq("candidate:1 1 udp 2122260223 10.0.0.1 8998 typ host")
+    end
+
+    it "relays multi-recipient batched messages" do
+      sign_in(user)
+
+      published = []
+      allow(MessageBus).to receive(:publish) do |channel, data, opts|
+        published << [channel, data, opts]
+      end
+
+      post "/audioroom/rooms/#{room.id}/signal.json",
+           params: {
+             payload: {
+               messages: [
+                 { recipient_id: staff.id, events: [{ type: "offer", sdp: "v=0" }] },
+                 {
+                   recipient_id: other_participant.id,
+                   events: [
+                     {
+                       type: "candidate",
+                       candidate: {
+                         candidate: "candidate:1 1 udp 2122260223 10.0.0.1 8998 typ host",
+                       },
+                     },
+                   ],
+                 },
+               ],
+             },
+           }
+
+      expect(response.status).to eq(204)
+      expect(published.size).to eq(2)
+      expect(published.map(&:first)).to all(eq(Audioroom.room_channel(room.id)))
+      expect(published.map { |(_, data)| data[:sender_id] }).to all(eq(user.id))
+
+      offer_payload = published.find { |(_, data)| data[:data][:type] == "offer" }
+      candidate_payload = published.find { |(_, data)| data[:data][:type] == "candidate" }
+
+      expect(offer_payload[1][:data][:sdp]).to eq("v=0")
+      expect(offer_payload[2][:user_ids]).to eq([staff.id])
+      expect(candidate_payload[1][:data][:candidate][:candidate]).to eq(
+        "candidate:1 1 udp 2122260223 10.0.0.1 8998 typ host",
+      )
+      expect(candidate_payload[2][:user_ids]).to eq([other_participant.id])
+    end
+  end
+end

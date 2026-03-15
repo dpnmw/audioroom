@@ -1,0 +1,441 @@
+import { tracked } from "@glimmer/tracking";
+import Service, { service } from "@ember/service";
+import { ajax } from "discourse/lib/ajax";
+import { bind } from "discourse/lib/decorators";
+
+export default class AudioroomRoomsService extends Service {
+  @service currentUser;
+  @service messageBus;
+  @service siteSettings;
+
+  @tracked rooms = [];
+  @tracked canCreateRoom = false;
+
+  #roomsById = new Map();
+  #roomsBySlug = new Map();
+  #roomSubscriptions = new Map();
+  #roomHandlers = new Map();
+
+  constructor() {
+    super(...arguments);
+    if (!this.currentUser || !this.siteSettings.audioroom_enabled) {
+      return;
+    }
+
+    this.ready = this.#bootstrap();
+    this.messageBus.subscribe(
+      "/audioroom/rooms/index",
+      this.handleDirectoryEvent
+    );
+  }
+
+  willDestroy() {
+    super.willDestroy(...arguments);
+    this.messageBus.unsubscribe(
+      "/audioroom/rooms/index",
+      this.handleDirectoryEvent
+    );
+    this.#roomSubscriptions.forEach((callback, roomId) => {
+      this.messageBus.unsubscribe(`/audioroom/rooms/${roomId}`, callback);
+    });
+    this.#roomSubscriptions.clear();
+    this.#roomHandlers.clear();
+  }
+
+  roomById(id) {
+    return this.#roomsById.get(id);
+  }
+
+  roomBySlug(slug) {
+    return this.#roomsBySlug.get(slug);
+  }
+
+  async #bootstrap() {
+    const payload = await ajax("/audioroom/rooms.json");
+    this.canCreateRoom = payload.can_create_room ?? false;
+    this.#hydrateRooms(payload.rooms);
+    return this.rooms;
+  }
+
+  #hydrateRooms(roomPayloads) {
+    this.rooms = roomPayloads;
+    this.#roomsById.clear();
+    this.#roomsBySlug.clear();
+
+    roomPayloads.forEach((room) => {
+      this.#roomsById.set(room.id, room);
+      this.#roomsBySlug.set(room.slug, room);
+      this.#ensureRoomSubscription(room.id);
+    });
+  }
+
+  @bind
+  handleDirectoryEvent(message) {
+    if (message.type === "destroyed") {
+      this.#roomsById.delete(message.room.id);
+      this.#roomsBySlug.delete(message.room.slug);
+      this.#teardownRoomSubscription(message.room.id);
+    } else {
+      this.#roomsById.set(message.room.id, message.room);
+      this.#roomsBySlug.set(message.room.slug, message.room);
+      this.#ensureRoomSubscription(message.room.id);
+    }
+
+    this.rooms = Array.from(this.#roomsById.values());
+  }
+
+  registerRoomHandler(roomId, callback) {
+    let handlers = this.#roomHandlers.get(roomId);
+    if (!handlers) {
+      handlers = new Set();
+      this.#roomHandlers.set(roomId, handlers);
+    }
+    handlers.add(callback);
+  }
+
+  unregisterRoomHandler(roomId, callback) {
+    const handlers = this.#roomHandlers.get(roomId);
+    if (!handlers) {
+      return;
+    }
+    handlers.delete(callback);
+    if (handlers.size === 0) {
+      this.#roomHandlers.delete(roomId);
+    }
+  }
+
+  handleRoomBroadcast(payload) {
+    const room = this.#roomsById.get(payload.room_id);
+    if (!room) {
+      return;
+    }
+
+    if (payload.type === "participants") {
+      this.#setRoomParticipants(room.id, payload.participants || []);
+    } else if (payload.type === "role_change") {
+      this.setParticipantRole(payload.room_id, payload.user_id, payload.role);
+      if (
+        payload.user_id === this.currentUser?.id &&
+        (payload.role === "speaker" || payload.role === "moderator")
+      ) {
+        const webrtc = this.owner.lookup("service:audioroom-webrtc");
+        webrtc?.onPromotedToSpeaker(room);
+      }
+    } else if (payload.type === "kicked") {
+      const webrtc = this.owner.lookup("service:audioroom-webrtc");
+      webrtc?.leave(room);
+    }
+
+    this.#forwardToRoomHandlers(payload.room_id, payload);
+  }
+
+  #ensureRoomSubscription(roomId) {
+    if (this.#roomSubscriptions.has(roomId)) {
+      return;
+    }
+
+    const channel = `/audioroom/rooms/${roomId}`;
+    const callback = (message) => this.handleRoomBroadcast(message);
+    this.messageBus.subscribe(channel, callback);
+    this.#roomSubscriptions.set(roomId, callback);
+  }
+
+  #teardownRoomSubscription(roomId) {
+    const callback = this.#roomSubscriptions.get(roomId);
+    if (callback) {
+      const channel = `/audioroom/rooms/${roomId}`;
+      this.messageBus.unsubscribe(channel, callback);
+      this.#roomSubscriptions.delete(roomId);
+    }
+    this.#roomHandlers.delete(roomId);
+  }
+
+  #forwardToRoomHandlers(roomId, payload) {
+    const handlers = this.#roomHandlers.get(roomId);
+    if (!handlers) {
+      return;
+    }
+    handlers.forEach((callback) => callback(payload));
+  }
+
+  addParticipant(roomId, participant) {
+    if (!participant?.id) {
+      return;
+    }
+
+    const room = this.#roomsById.get(roomId);
+    if (!room) {
+      return;
+    }
+
+    const existing = room.active_participants || [];
+    if (existing.some((p) => p?.id === participant.id)) {
+      return;
+    }
+
+    room.active_participants = [
+      ...existing,
+      { ...participant, is_speaking: participant.is_speaking || false },
+    ];
+    this.rooms = [...this.rooms];
+  }
+
+  removeParticipant(roomId, userId) {
+    const targetId = Number(userId);
+    if (!targetId) {
+      return;
+    }
+
+    const room = this.#roomsById.get(roomId);
+    if (!room || !Array.isArray(room.active_participants)) {
+      return;
+    }
+
+    const filtered = room.active_participants.filter(
+      (participant) => Number(participant?.id) !== targetId
+    );
+
+    if (filtered.length === room.active_participants.length) {
+      return;
+    }
+
+    room.active_participants = filtered;
+    this.rooms = [...this.rooms];
+  }
+
+  // Called by audioroom-webrtc when LiveKit ActiveSpeakersChanged fires.
+  // speakingUserIds is a Set<number> of currently speaking user IDs.
+  updateSpeakingState(roomId, speakingUserIds) {
+    const room = this.#roomsById.get(roomId);
+    if (!room || !Array.isArray(room.active_participants)) {
+      return;
+    }
+
+    let changed = false;
+    room.active_participants = room.active_participants.map((participant) => {
+      const id = Number(participant?.id);
+      if (!id) {
+        return participant;
+      }
+      const speaking = speakingUserIds.has(id);
+      if (!!participant.is_speaking === speaking) {
+        return participant;
+      }
+      changed = true;
+      return { ...participant, is_speaking: speaking };
+    });
+
+    if (changed) {
+      this.rooms = [...this.rooms];
+    }
+  }
+
+  setParticipantSpeaking(roomId, userId, speaking) {
+    const targetId = Number(userId);
+    if (!targetId) {
+      return;
+    }
+
+    const room = this.#roomsById.get(roomId);
+    if (!room || !Array.isArray(room.active_participants)) {
+      return;
+    }
+
+    let changed = false;
+    room.active_participants = room.active_participants.map((participant) => {
+      const participantId = Number(participant?.id);
+      if (!participantId || participantId !== targetId) {
+        return participant;
+      }
+
+      if (!!participant.is_speaking === speaking) {
+        return participant;
+      }
+
+      changed = true;
+      return {
+        ...participant,
+        is_speaking: speaking,
+      };
+    });
+
+    if (changed) {
+      this.rooms = [...this.rooms];
+    }
+  }
+
+  setParticipantMuted(roomId, userId, muted) {
+    const targetId = Number(userId);
+    if (!targetId) {
+      return;
+    }
+
+    const room = this.#roomsById.get(roomId);
+    if (!room || !Array.isArray(room.active_participants)) {
+      return;
+    }
+
+    let changed = false;
+    room.active_participants = room.active_participants.map((participant) => {
+      const participantId = Number(participant?.id);
+      if (!participantId || participantId !== targetId) {
+        return participant;
+      }
+
+      if (!!participant.is_muted === muted) {
+        return participant;
+      }
+
+      changed = true;
+      return {
+        ...participant,
+        is_muted: muted,
+      };
+    });
+
+    if (changed) {
+      this.rooms = [...this.rooms];
+    }
+  }
+
+  setParticipantIdleState(roomId, userId, idleState) {
+    const targetId = Number(userId);
+    if (!targetId) {
+      return;
+    }
+
+    const room = this.#roomsById.get(roomId);
+    if (!room || !Array.isArray(room.active_participants)) {
+      return;
+    }
+
+    let changed = false;
+    room.active_participants = room.active_participants.map((participant) => {
+      const participantId = Number(participant?.id);
+      if (!participantId || participantId !== targetId) {
+        return participant;
+      }
+
+      if (participant.idle_state === idleState) {
+        return participant;
+      }
+
+      changed = true;
+      return {
+        ...participant,
+        idle_state: idleState,
+      };
+    });
+
+    if (changed) {
+      this.rooms = [...this.rooms];
+    }
+  }
+
+  setParticipantRole(roomId, userId, role) {
+    const targetId = Number(userId);
+    if (!targetId) {
+      return;
+    }
+
+    const room = this.#roomsById.get(roomId);
+    if (!room || !Array.isArray(room.active_participants)) {
+      return;
+    }
+
+    let changed = false;
+    room.active_participants = room.active_participants.map((participant) => {
+      const participantId = Number(participant?.id);
+      if (!participantId || participantId !== targetId) {
+        return participant;
+      }
+
+      if (participant.role === role) {
+        return participant;
+      }
+
+      changed = true;
+      return {
+        ...participant,
+        role,
+      };
+    });
+
+    if (changed) {
+      this.rooms = [...this.rooms];
+    }
+  }
+
+  setParticipantDeafened(roomId, userId, deafened) {
+    const targetId = Number(userId);
+    if (!targetId) {
+      return;
+    }
+
+    const room = this.#roomsById.get(roomId);
+    if (!room || !Array.isArray(room.active_participants)) {
+      return;
+    }
+
+    let changed = false;
+    room.active_participants = room.active_participants.map((participant) => {
+      const participantId = Number(participant?.id);
+      if (!participantId || participantId !== targetId) {
+        return participant;
+      }
+
+      if (!!participant.is_deafened === deafened) {
+        return participant;
+      }
+
+      changed = true;
+      return {
+        ...participant,
+        is_deafened: deafened,
+      };
+    });
+
+    if (changed) {
+      this.rooms = [...this.rooms];
+    }
+  }
+
+  #setRoomParticipants(roomId, participants) {
+    const room = this.#roomsById.get(roomId);
+    if (!room) {
+      return;
+    }
+
+    const previous = room.active_participants || [];
+    const stateByUserId = new Map(
+      previous
+        .filter((participant) => Number(participant?.id))
+        .map((participant) => [
+          Number(participant.id),
+          {
+            is_speaking: participant.is_speaking === true,
+            is_muted: participant.is_muted === true,
+            is_deafened: participant.is_deafened === true,
+            idle_state: participant.idle_state,
+          },
+        ])
+    );
+
+    room.active_participants = (participants || []).map((participant) => {
+      const participantId = Number(participant?.id);
+      const previousState = stateByUserId.get(participantId);
+      if (!participantId || !previousState) {
+        return participant;
+      }
+
+      return {
+        ...participant,
+        is_speaking: previousState.is_speaking,
+        is_muted: participant.is_muted ?? previousState.is_muted,
+        is_deafened: participant.is_deafened ?? previousState.is_deafened,
+        idle_state: participant.idle_state ?? previousState.idle_state,
+      };
+    });
+    this.rooms = [...this.rooms];
+  }
+}

@@ -1,0 +1,59 @@
+# frozen_string_literal: true
+
+module Audioroom
+  module GuardianExtension
+    def can_access_audioroom?
+      SiteSetting.audioroom_enabled? && authenticated? &&
+        user.in_any_groups?(SiteSetting.audioroom_allowed_groups_map)
+    end
+
+    def can_manage_audioroom_rooms?
+      return false unless can_access_audioroom?
+      user.in_any_groups?(SiteSetting.audioroom_create_room_allowed_groups_map)
+    end
+
+    def can_manage_audioroom_room?(room)
+      return false unless can_access_audioroom?
+      return false unless room
+
+      can_manage_audioroom_rooms? || room.creator_id == user&.id ||
+        room.moderator_ids.include?(user&.id)
+    end
+
+    def ensure_can_manage_audioroom_room!(room)
+      unless can_manage_audioroom_room?(room)
+        raise Discourse::InvalidAccess.new(I18n.t("audioroom.errors.not_authorized"))
+      end
+    end
+
+    def ensure_can_create_audioroom_room!
+      unless can_manage_audioroom_rooms?
+        raise Discourse::InvalidAccess.new(I18n.t("audioroom.errors.not_authorized"))
+      end
+    end
+
+    def can_join_audioroom_room?(room)
+      return false unless can_access_audioroom?
+      return false unless room
+
+      room.public? || room.member_ids.include?(user.id) || can_manage_audioroom_room?(room)
+    end
+
+    def ensure_can_join_audioroom_room!(room)
+      unless can_join_audioroom_room?(room)
+        raise Discourse::InvalidAccess.new(I18n.t("audioroom.errors.not_authorized"))
+      end
+    end
+
+    def can_see_audioroom_room?(room)
+      can_join_audioroom_room?(room)
+    end
+
+    def can_speak_in_audioroom_room?(room)
+      return true if room.open?
+      return true if user&.admin?
+      membership = room.room_memberships.find { |m| m.user_id == user&.id }
+      membership&.can_speak? || false
+    end
+  end
+end
